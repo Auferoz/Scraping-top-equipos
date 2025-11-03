@@ -14,10 +14,57 @@ function getFormattedDate() {
 }
 
 /**
- * Función para hacer scraping de una página individual de equipo
- * @param {string} url - URL a scrapear
+ * Función auxiliar para obtener la capacidad de un equipo individual de Entel
+ * @param {Object} page - Página de Puppeteer
+ * @param {string} equipoUrl - URL relativa del equipo
+ * @returns {Promise<string>} - Capacidad del equipo o 'N/A'
+ */
+async function getEntelCapacity(page, equipoUrl) {
+  try {
+    const fullUrl = `https://miportal.entel.cl${equipoUrl}`;
+    console.log(`  → Obteniendo capacidad de: ${equipoUrl}`);
+
+    await page.goto(fullUrl, {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+
+    // Esperar a que cargue cualquiera de los dos posibles selectores
+    await Promise.race([
+      page.waitForSelector('.pdp__header__capacity', { timeout: 10000 }),
+      page.waitForSelector('.pdp__variant-selection__capacity--label', { timeout: 10000 })
+    ]).catch(() => {
+      // Si ambos fallan, continuamos de todos modos
+    });
+
+    const capacity = await page.evaluate(() => {
+      // Intentar con el primer selector
+      let capacityElement = document.querySelector('.pdp__header__capacity');
+      if (capacityElement) {
+        return capacityElement.textContent.trim();
+      }
+
+      // Intentar con el selector alternativo (botón seleccionado)
+      capacityElement = document.querySelector('.pdp__variant-selection__capacity--label');
+      if (capacityElement) {
+        return capacityElement.textContent.trim();
+      }
+
+      return 'N/A';
+    });
+
+    return capacity;
+  } catch (error) {
+    console.log(`  ✗ Error obteniendo capacidad: ${error.message}`);
+    return 'N/A';
+  }
+}
+
+/**
+ * Función para hacer scraping de una página de listado de equipos
+ * @param {string} url - URL del catálogo a scrapear
  * @param {string} compania - Nombre de la compañía (entel, wom, etc.)
- * @returns {Promise<Object>} - Datos extraídos del equipo
+ * @returns {Promise<Object[]>} - Array de datos extraídos de todos los equipos
  */
 async function scrapePage(url, compania = 'entel') {
   let browser;
@@ -37,209 +84,481 @@ async function scrapePage(url, compania = 'entel') {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     // Navegar a la página
-    console.log('Cargando página del equipo...');
+    console.log('Cargando página del catálogo...');
     await page.goto(url, {
       waitUntil: 'networkidle2',
       timeout: 60000
     });
 
     // Esperar a que cargue el contenido principal según la compañía
-    console.log('Esperando contenido del equipo...');
+    console.log('Esperando listado de equipos...');
 
     if (compania.toLowerCase() === 'entel') {
-      await page.waitForSelector('.pdp__header__brand, .equipment-title', { timeout: 30000 });
+      await page.waitForSelector('.product-col', { timeout: 30000 });
     } else if (compania.toLowerCase() === 'wom') {
-      await page.waitForSelector('.select-details-module--productName--3TCGY, h1', { timeout: 30000 });
+      await page.waitForSelector('.Product-module--container--BMAkS', { timeout: 30000 });
+    } else if (compania.toLowerCase() === 'movistar') {
+      await page.waitForSelector('li.item.product.product-item', { timeout: 30000 });
+    } else if (compania.toLowerCase() === 'claro') {
+      await page.waitForSelector('li.ui-block-a', { timeout: 30000 });
     }
 
     // Esperar un poco más para asegurar que todo cargó
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // Extraer datos usando evaluación en el navegador según la compañía
-    const equipoData = await page.evaluate((companiaLower) => {
-      // Función auxiliar para extraer texto de forma segura
-      const getText = (selector) => {
-        const element = document.querySelector(selector);
-        return element ? element.textContent.trim() : 'N/A';
-      };
+    let equiposData = [];
 
-      let marcaEquipo, modelo, capacityEquipo, precioOferta, descuentoEquipo;
-      let numeroCuota = 'N/A';
-      let precioCuota = 'N/A';
-      let numeroCuotaNormal = 'N/A';
-      let precioCuotaNormal = 'N/A';
-      let precioNormal = 'N/A';
+    if (compania.toLowerCase() === 'entel') {
+      // ========== ENTEL: Scraping de dos niveles ==========
 
-      if (companiaLower === 'entel') {
-        // ========== SELECTORES PARA ENTEL ==========
+      // Nivel 1: Extraer datos básicos del listado
+      const equiposBasicos = await page.evaluate(() => {
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
 
-        // Extraer marca
-        marcaEquipo = getText('.pdp__header__brand');
+        const equipos = [];
+        const equipoCards = document.querySelectorAll('.product-col');
 
-        // Extraer modelo
-        modelo = getText('h1.equipment-title.pdp__header__main-title');
+        equipoCards.forEach(card => {
+          const linkElement = card.querySelector('a[href*="/personas/celulares/"]');
+          const equipoUrl = linkElement ? linkElement.getAttribute('href') : 'N/A';
+          const marcaEquipo = getText(card, 'p.info-marca');
+          const modelo = getText(card, 'p.info-equipo');
 
-        // Extraer capacidad
-        capacityEquipo = getText('.pdp__header__capacity');
+          const precioOfertaElement = card.querySelector('b.info-precio');
+          const precioOferta = precioOfertaElement ? precioOfertaElement.textContent.trim() : 'N/A';
 
-        // Extraer precio oferta (primer precio con clase selected)
-        const precioOfertaElement = document.querySelector('.pdp__purchase-option__body--prices.selected');
-        precioOferta = precioOfertaElement ? precioOfertaElement.textContent.trim() : 'N/A';
+          const precioNormalElements = card.querySelectorAll('s.price');
+          const precioNormal = precioNormalElements.length > 0 ? precioNormalElements[0].textContent.trim() : 'N/A';
 
-        // Extraer descuento
-        descuentoEquipo = getText('.pdp__purchase-option__body--badge__discount');
-
-        // Extraer información de cuotas (primer bloque de cuotas)
-        const cuotasElements = document.querySelectorAll('.pdp__purchase-option__body--coutes__text');
-
-        // Primera cuota (oferta)
-        if (cuotasElements[0]) {
-          const cuotasText = cuotasElements[0].textContent;
-          const numeroCuotaMatch = cuotasText.match(/(\d+)\s*cuotas/i);
-          if (numeroCuotaMatch) {
-            numeroCuota = numeroCuotaMatch[1];
+          // Extraer descuento - buscar el div con texto que contenga "% dcto."
+          // Puede tener diferentes colores de fondo: verde agua (160, 243, 217) o naranja (255, 158, 128)
+          let descuentoEquipo = 'N/A';
+          const allDivsInCard = card.querySelectorAll('div[style*="background"]');
+          for (let div of allDivsInCard) {
+            const texto = div.textContent.trim();
+            // Buscar divs que contengan porcentaje de descuento
+            if ((texto.includes('dcto.') || texto.includes('%')) && texto.match(/\d+\s*%/)) {
+              descuentoEquipo = texto;
+              break;
+            }
           }
-          const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)\/mes/);
-          if (precioCuotaMatch) {
-            precioCuota = '$' + precioCuotaMatch[1] + '/mes';
+
+          let numeroCuota = 'N/A';
+          let precioCuota = 'N/A';
+          const cuotasElement = card.querySelector('.info-subprecio.cuotas');
+          if (cuotasElement) {
+            const cuotasText = cuotasElement.textContent;
+            const numeroCuotaMatch = cuotasText.match(/(\d+)\s*cuotas/i);
+            if (numeroCuotaMatch) numeroCuota = numeroCuotaMatch[1];
+            const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)/);
+            if (precioCuotaMatch) precioCuota = '$' + precioCuotaMatch[1];
           }
-        }
 
-        // Extraer precio normal (segundo precio sin selected)
-        const allPrices = document.querySelectorAll('.pdp__purchase-option__body--prices.pdp__purchase-option__body--prices__price');
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal: 'N/A',
+            precioCuotaNormal: 'N/A',
+            equipoUrl
+          });
+        });
 
-        // Buscar el precio que NO tenga la clase selected
-        for (let i = 0; i < allPrices.length; i++) {
-          if (!allPrices[i].classList.contains('selected')) {
-            precioNormal = allPrices[i].textContent.trim();
-            break;
-          }
-        }
+        return equipos;
+      });
 
-        // Segunda cuota (normal)
-        if (cuotasElements[1]) {
-          const cuotasNormalText = cuotasElements[1].textContent;
-          const numeroCuotaNormalMatch = cuotasNormalText.match(/(\d+)\s*cuotas/i);
-          if (numeroCuotaNormalMatch) {
-            numeroCuotaNormal = numeroCuotaNormalMatch[1];
-          }
-          const precioCuotaNormalMatch = cuotasNormalText.match(/\$([0-9.,]+)\/mes/);
-          if (precioCuotaNormalMatch) {
-            precioCuotaNormal = '$' + precioCuotaNormalMatch[1] + '/mes';
-          }
-        }
+      console.log(`  ${equiposBasicos.length} equipos encontrados en el listado`);
 
-      } else if (companiaLower === 'wom') {
-        // ========== SELECTORES PARA WOM ==========
+      // Nivel 2: Por cada equipo, obtener la capacidad visitando su página individual
+      for (let i = 0; i < equiposBasicos.length; i++) {
+        const equipo = equiposBasicos[i];
 
-        // Extraer marca - WOM no tiene selector específico para marca, usar N/A por ahora
-        marcaEquipo = 'N/A';
+        if (equipo.equipoUrl !== 'N/A') {
+          // Obtener la capacidad visitando la página del equipo
+          const capacity = await getEntelCapacity(page, equipo.equipoUrl);
+          equipo.capacityEquipo = capacity;
 
-        // Extraer modelo
-        modelo = getText('h1.select-details-module--productName--3TCGY');
-
-        // Extraer capacidad
-        const capacidadElement = document.querySelector('h2.select-details-module--ram--1hMuO');
-        if (capacidadElement) {
-          const capacidadText = capacidadElement.textContent.trim();
-          // Extraer solo la capacidad (ej: "256GB" de "Almacenamiento 256GB")
-          const capacidadMatch = capacidadText.match(/(\d+\s*GB)/i);
-          capacityEquipo = capacidadMatch ? capacidadMatch[1] : capacidadText;
+          // Pequeño delay entre equipos
+          await new Promise(resolve => setTimeout(resolve, 500));
         } else {
-          capacityEquipo = 'N/A';
+          equipo.capacityEquipo = 'N/A';
         }
 
-        // Extraer precio oferta
-        const precioOfertaElement = document.querySelector('.select-details-module--price--AntS5 .select-details-module--value--1lDtu');
-        if (precioOfertaElement) {
-          precioOferta = precioOfertaElement.textContent.trim();
-        } else {
-          precioOferta = 'N/A';
-        }
-
-        // Extraer descuento
-        const descuentoElement = document.querySelector('.index-module--Offer__Discount__New--2k4R2');
-        if (descuentoElement) {
-          descuentoEquipo = descuentoElement.textContent.trim();
-        } else {
-          descuentoEquipo = 'N/A';
-        }
-
-        // Extraer número de cuotas
-        const cuotasElement = document.querySelector('.select-details-module--installments--3OcDH');
-        if (cuotasElement) {
-          const cuotasText = cuotasElement.textContent.trim();
-          // Extraer número de cuotas (ej: "24" de "Elígelo hasta en 24 cuotas sin interés")
-          const numeroCuotaMatch = cuotasText.match(/(\d+)\s*cuotas/i);
-          if (numeroCuotaMatch) {
-            numeroCuota = numeroCuotaMatch[1];
-          }
-        }
-
-        // Por ahora dejamos el resto como N/A hasta que me indiques de dónde sacarlos
-        precioCuota = 'N/A';
-        precioNormal = 'N/A';
-        numeroCuotaNormal = 'N/A';
-        precioCuotaNormal = 'N/A';
+        equiposData.push(equipo);
       }
 
-      return {
-        marcaEquipo,
-        modelo,
-        capacityEquipo,
-        precioOferta,
-        descuentoEquipo,
-        numeroCuota,
-        precioCuota,
-        precioNormal,
-        numeroCuotaNormal,
-        precioCuotaNormal
-      };
-    }, compania.toLowerCase());
+    } else if (compania.toLowerCase() === 'wom') {
+      // ========== WOM: Scraping de un nivel (como antes) ==========
 
-    // Agregar metadata y compañía
-    equipoData.compania = compania.charAt(0).toUpperCase() + compania.slice(1); // Capitalizar primera letra
-    equipoData.url = url;
-    equipoData.fechaScraping = getFormattedDate();
+      equiposData = await page.evaluate(() => {
+        // Función auxiliar para extraer texto de forma segura
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
+
+        const equipos = [];
+
+        // Obtener todos los contenedores de equipos
+        const equipoCards = document.querySelectorAll('.Product-module--container--BMAkS');
+
+        equipoCards.forEach(card => {
+          // URL del equipo - necesitaríamos el link completo
+          const equipoUrl = 'N/A'; // WOM no muestra el link directamente en el contenedor
+
+          // Extraer marca
+          const marcaEquipo = getText(card, 'strong.PhoneTitle-module--Title__Brand--4H8uF');
+
+          // Extraer modelo
+          const modelo = getText(card, 'strong.PhoneTitle-module--Title__Model--3om16');
+
+          // Extraer capacidad del modelo (viene en el nombre)
+          let capacityEquipo = 'N/A';
+          if (modelo.includes('256GB')) {
+            capacityEquipo = '256 GB';
+          } else if (modelo.includes('128GB')) {
+            capacityEquipo = '128 GB';
+          } else if (modelo.includes('512GB')) {
+            capacityEquipo = '512 GB';
+          }
+
+          // Extraer precio oferta
+          const precioOferta = getText(card, 'span.PhonePrice-module--Pricing__Price--1hJ1C');
+
+          // Extraer precio normal (tachado)
+          let precioNormal = 'N/A';
+          const precioNormalElement = card.querySelector('p.PhonePrice-module--Pricing__Offer--PFWNc s');
+          if (precioNormalElement) {
+            precioNormal = precioNormalElement.textContent.trim();
+          }
+
+          // Extraer descuento
+          const descuentoEquipo = getText(card, 'strong.PhoneOffer-module--Offer__Discount--3_2Z9');
+
+          // Extraer información de cuotas
+          let numeroCuota = 'N/A';
+          let precioCuota = 'N/A';
+          const cuotasElement = card.querySelector('p.PhonePrice-module--Pricing__Paragraph--3Aun-');
+          if (cuotasElement) {
+            const cuotasText = cuotasElement.textContent;
+            // Extraer número de cuotas (ej: "24" de "Hasta en 24 cuotas")
+            const numeroCuotaMatch = cuotasText.match(/(\d+)\s*cuotas/i);
+            if (numeroCuotaMatch) {
+              numeroCuota = numeroCuotaMatch[1];
+            }
+            // Extraer precio de cuota (ej: "$7.500")
+            const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)/);
+            if (precioCuotaMatch) {
+              precioCuota = '$' + precioCuotaMatch[1];
+            }
+          }
+
+          // Cuotas normales - no disponibles en listado
+          const numeroCuotaNormal = 'N/A';
+          const precioCuotaNormal = 'N/A';
+
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            capacityEquipo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal,
+            precioCuotaNormal,
+            equipoUrl
+          });
+        });
+
+        return equipos;
+      });
+
+    } else if (compania.toLowerCase() === 'movistar') {
+      // ========== MOVISTAR: Scraping de un nivel ==========
+
+      equiposData = await page.evaluate(() => {
+        // Función auxiliar para extraer texto de forma segura
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
+
+        const equipos = [];
+
+        // Obtener todos los contenedores de equipos
+        const equipoCards = document.querySelectorAll('li.item.product.product-item');
+
+        equipoCards.forEach(card => {
+          // Extraer URL del equipo
+          const linkElement = card.querySelector('a.product-item-link');
+          const equipoUrl = linkElement ? linkElement.getAttribute('href') : 'N/A';
+
+          // Extraer el nombre completo del equipo (incluye marca y modelo)
+          const nombreCompleto = getText(card, 'h2');
+
+          // Intentar separar marca y modelo del nombre completo
+          // Ej: "Samsung Galaxy S24 5G 128GB Negro Mate"
+          let marcaEquipo = 'N/A';
+          let modelo = nombreCompleto;
+
+          if (nombreCompleto !== 'N/A') {
+            const palabras = nombreCompleto.split(' ');
+            if (palabras.length > 0) {
+              marcaEquipo = palabras[0]; // Primera palabra es la marca
+              modelo = nombreCompleto; // Modelo completo incluye todo
+            }
+          }
+
+          // Extraer capacidad del nombre (ej: "128GB", "256GB")
+          let capacityEquipo = 'N/A';
+          const capacityMatch = nombreCompleto.match(/(\d+\s*GB)/i);
+          if (capacityMatch) {
+            capacityEquipo = capacityMatch[1].replace(/\s/g, ' '); // Normalizar espacios
+          }
+
+          // Extraer precio oferta
+          const precioOferta = getText(card, 'span.divCon-plan-txt-valor-sinLabel');
+
+          // Extraer precio normal (tachado)
+          const precioNormal = getText(card, 'span.old-price span.price');
+
+          // Extraer descuento
+          let descuentoEquipo = getText(card, 'span.divSin-plan-txt-dcto');
+
+          // Extraer información de cuotas
+          let numeroCuota = 'N/A';
+          let precioCuota = 'N/A';
+          const cuotasElement = card.querySelector('div.monthly-price');
+          if (cuotasElement) {
+            const cuotasText = cuotasElement.textContent;
+            // Ej: "en 24 x $19.583 sin interés*"
+            const numeroCuotaMatch = cuotasText.match(/(\d+)\s*x/i);
+            if (numeroCuotaMatch) {
+              numeroCuota = numeroCuotaMatch[1];
+            }
+            const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)/);
+            if (precioCuotaMatch) {
+              precioCuota = '$' + precioCuotaMatch[1];
+            }
+          }
+
+          // Cuotas normales - no disponibles en listado
+          const numeroCuotaNormal = 'N/A';
+          const precioCuotaNormal = 'N/A';
+
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            capacityEquipo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal,
+            precioCuotaNormal,
+            equipoUrl
+          });
+        });
+
+        return equipos;
+      });
+
+    } else if (compania.toLowerCase() === 'claro') {
+      // ========== CLARO: Scraping de un nivel ==========
+
+      equiposData = await page.evaluate(() => {
+        // Función auxiliar para extraer texto de forma segura
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
+
+        const equipos = [];
+
+        // Obtener todos los contenedores de equipos
+        const equipoCards = document.querySelectorAll('li.ui-block-a');
+
+        equipoCards.forEach(card => {
+          // Verificar que tenga la estructura de producto
+          const productDiv = card.querySelector('div.product');
+          if (!productDiv) return;
+
+          // Extraer URL del equipo
+          const linkElement = card.querySelector('a#catalogEntry_img');
+          const equipoUrl = linkElement ? linkElement.getAttribute('href') : 'N/A';
+
+          // Extraer el nombre completo del equipo (incluye marca y modelo)
+          const nombreCompleto = getText(card, 'a.title-product');
+
+          // Intentar separar marca y modelo del nombre completo
+          // Ej: "iPhone 16 5G 128GB Rosado"
+          let marcaEquipo = 'N/A';
+          let modelo = nombreCompleto;
+
+          if (nombreCompleto !== 'N/A') {
+            const palabras = nombreCompleto.split(' ');
+            if (palabras.length > 0) {
+              // Para iPhone/iPad/etc, la marca es la primera palabra
+              if (palabras[0].toLowerCase().includes('iphone') || palabras[0].toLowerCase().includes('ipad')) {
+                marcaEquipo = 'Apple';
+              } else {
+                marcaEquipo = palabras[0]; // Primera palabra es la marca
+              }
+              modelo = nombreCompleto; // Modelo completo incluye todo
+            }
+          }
+
+          // Extraer capacidad desde span.storage (ej: "128GB / 5G")
+          let capacityEquipo = 'N/A';
+          const storageText = getText(card, 'span.storage');
+          if (storageText !== 'N/A') {
+            const capacityMatch = storageText.match(/(\d+\s*GB)/i);
+            if (capacityMatch) {
+              capacityEquipo = capacityMatch[1].replace(/(\d+)GB/, '$1 GB'); // Normalizar con espacio
+            }
+          }
+
+          // Extraer precio oferta (span con id que empieza con offerPrice_)
+          let precioOferta = 'N/A';
+          const precioOfertaElement = card.querySelector('span[id^="offerPrice_"].price');
+          if (precioOfertaElement) {
+            precioOferta = precioOfertaElement.textContent.trim();
+          }
+
+          // Extraer precio normal (dentro de .old_price)
+          let precioNormal = 'N/A';
+          const precioNormalElement = card.querySelector('.old_price span.new-price');
+          if (precioNormalElement) {
+            precioNormal = precioNormalElement.textContent.trim();
+          }
+
+          // Extraer descuento (ej: "23%")
+          let descuentoEquipo = getText(card, '.discount-product');
+          if (descuentoEquipo !== 'N/A' && !descuentoEquipo.includes('%')) {
+            descuentoEquipo = descuentoEquipo + '%';
+          }
+
+          // Claro no muestra información de cuotas en el listado
+          const numeroCuota = 'N/A';
+          const precioCuota = 'N/A';
+          const numeroCuotaNormal = 'N/A';
+          const precioCuotaNormal = 'N/A';
+
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            capacityEquipo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal,
+            precioCuotaNormal,
+            equipoUrl
+          });
+        });
+
+        return equipos;
+      });
+    }
 
     await browser.close();
 
     console.log(`✓ Scraping completado para: ${url}`);
-    console.log(`  Equipo: ${equipoData.marcaEquipo} ${equipoData.modelo}`);
+    console.log(`  ${equiposData.length} equipos encontrados`);
 
-    return equipoData;
+    // Agregar metadata a cada equipo
+    const equiposConMetadata = equiposData.map(equipo => {
+      let finalUrl = url;
+      if (equipo.equipoUrl !== 'N/A') {
+        if (compania.toLowerCase() === 'entel') {
+          finalUrl = `https://miportal.entel.cl${equipo.equipoUrl}`;
+        } else if (compania.toLowerCase() === 'wom') {
+          // WOM no proporciona URL individual en el listado
+          finalUrl = url;
+        } else if (compania.toLowerCase() === 'movistar') {
+          // Movistar ya tiene la URL completa
+          finalUrl = equipo.equipoUrl;
+        } else if (compania.toLowerCase() === 'claro') {
+          // Claro proporciona URL relativa, construir URL completa
+          if (equipo.equipoUrl.startsWith('http')) {
+            finalUrl = equipo.equipoUrl;
+          } else {
+            finalUrl = `https://www.clarochile.cl${equipo.equipoUrl}`;
+          }
+        }
+      }
+
+      return {
+        compania: compania.charAt(0).toUpperCase() + compania.slice(1),
+        ...equipo,
+        url: finalUrl,
+        fechaScraping: getFormattedDate()
+      };
+    });
+
+    // Eliminar el campo temporal equipoUrl
+    equiposConMetadata.forEach(equipo => {
+      delete equipo.equipoUrl;
+    });
+
+    return equiposConMetadata;
 
   } catch (error) {
     console.error(`✗ Error scrapeando ${url}:`, error.message);
     if (browser) {
       await browser.close();
     }
-    return {
+    return [{
       compania: compania.charAt(0).toUpperCase() + compania.slice(1),
-      error: error.message,
+      marcaEquipo: 'ERROR',
+      modelo: error.message,
+      capacityEquipo: 'N/A',
+      precioOferta: 'N/A',
+      descuentoEquipo: 'N/A',
+      numeroCuota: 'N/A',
+      precioCuota: 'N/A',
+      precioNormal: 'N/A',
+      numeroCuotaNormal: 'N/A',
+      precioCuotaNormal: 'N/A',
       url: url,
       fechaScraping: getFormattedDate()
-    };
+    }];
   }
 }
 
 /**
- * Función para scrapear múltiples URLs
+ * Función para scrapear múltiples URLs de catálogos
  * @param {Array<{compania: string, url: string}>} urls - Array de objetos con compañía y URL
- * @returns {Promise<Object[]>} - Array con todos los datos extraídos
+ * @returns {Promise<Object[]>} - Array con todos los datos extraídos de todos los equipos
  */
 async function scrapeMultiplePages(urls) {
   const results = [];
 
   for (const item of urls) {
     const { compania, url } = item;
-    const equipoData = await scrapePage(url, compania);
+    const equiposData = await scrapePage(url, compania);
 
-    // Agregar el equipo al array de resultados
-    results.push(equipoData);
+    // equiposData es un array de equipos, así que lo concatenamos
+    results.push(...equiposData);
 
     // Delay entre peticiones para no sobrecargar el servidor
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
 
   return results;

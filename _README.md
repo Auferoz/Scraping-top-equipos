@@ -1,11 +1,11 @@
 # Scraping Top Equipos
 
-Proyecto de web scraping que extrae datos de URLs configuradas y los guarda automáticamente en Google Sheets mediante SheetDB.
+Proyecto de web scraping que extrae datos de catálogos de equipos móviles de Entel y WOM, y los guarda automáticamente en Google Sheets mediante SheetDB.
 
 ## Estructura del Proyecto
 
-- `urls.js` - Archivo donde se configuran las URLs a scrapear
-- `scraper.js` - Lógica de scraping con Cheerio
+- `urls.js` - Archivo donde se configuran las URLs de los catálogos a scrapear
+- `scraper.js` - Lógica de scraping con Puppeteer (extrae todos los equipos de cada página de catálogo)
 - `sheetdb.js` - Integración con SheetDB para guardar datos
 - `index.js` - Archivo principal que coordina todo el proceso
 
@@ -20,28 +20,25 @@ npm install
 
 ### 1. Configurar URLs
 
-Edita el archivo [urls.js](urls.js) y agrega las URLs que deseas scrapear:
+Edita el archivo [urls.js](urls.js) y agrega las URLs de los catálogos que deseas scrapear:
 
 ```javascript
 const urls = [
-  'https://tu-sitio-web.com/pagina1',
-  'https://tu-sitio-web.com/pagina2',
-  // Agrega más URLs aquí
+  { compania: 'entel', url: 'https://miportal.entel.cl/personas/catalogo/celulares/' },
+  { compania: 'wom', url: 'https://store.wom.cl/equipos/' },
+  // Agrega más URLs de catálogos aquí
 ];
 ```
 
+**Nota:** El scraper ahora extrae **todos los equipos** que aparecen en cada página de catálogo.
+
 ### 2. Personalizar el Scraper
 
-Edita el archivo [scraper.js](scraper.js) en la función `scrapePage()` para ajustar los selectores CSS según la estructura de las páginas que vas a scrapear:
+El scraper ya está configurado para:
+- **Entel**: Extrae equipos de `.product-col` en páginas de catálogo
+- **WOM**: Extrae equipos de `.Product-module--container--BMAkS` en páginas de listado
 
-```javascript
-const data = {
-  url: url,
-  titulo: $('h1').first().text().trim(),
-  precio: $('.precio').text().trim(),
-  // Agrega más campos según necesites
-};
-```
+Si necesitas ajustar los selectores CSS, edita el archivo [scraper.js](scraper.js) en la función `scrapePage()`.
 
 ### 3. SheetDB
 
@@ -69,9 +66,12 @@ node index.js
 
 El script realiza las siguientes acciones:
 
-1. Lee las URLs del archivo `urls.js`
-2. Hace scraping de cada URL (con delay de 1 segundo entre peticiones)
-3. Extrae los datos según los selectores configurados
+1. Lee las URLs de catálogos del archivo `urls.js`
+2. Para cada catálogo:
+   - Navega a la página usando Puppeteer
+   - Extrae **todos los equipos** que aparecen en el listado
+   - Espera 2 segundos entre catálogos para no sobrecargar el servidor
+3. Extrae los datos de cada equipo según los selectores configurados
 4. Guarda todos los resultados en la hoja "Equipos" de tu spreadsheet via SheetDB
 
 ## Funciones Disponibles
@@ -85,11 +85,13 @@ El script realiza las siguientes acciones:
 
 ## Dependencias
 
-- `axios` - Para hacer peticiones HTTP
-- `cheerio` - Para parsear y extraer datos del HTML
+- `axios` - Para hacer peticiones HTTP a SheetDB
+- `puppeteer` - Para navegar y extraer datos de páginas dinámicas
 
 ## Notas
 
-- El scraper incluye un delay de 1 segundo entre peticiones para no sobrecargar los servidores
+- El scraper usa Puppeteer en modo headless para navegar las páginas
+- Incluye un delay de 2 segundos entre catálogos para no sobrecargar los servidores
 - Los errores se capturan y registran en consola
 - Cada registro incluye la fecha de scraping automáticamente
+- **IMPORTANTE**: Este scraper extrae todos los equipos de cada página de catálogo, no equipos individuales
