@@ -100,7 +100,7 @@ async function scrapePage(url, compania = 'entel') {
     } else if (compania.toLowerCase() === 'movistar') {
       await page.waitForSelector('li.item.product.product-item', { timeout: 30000 });
     } else if (compania.toLowerCase() === 'claro') {
-      await page.waitForSelector('li.ui-block-a', { timeout: 30000 });
+      await page.waitForSelector('li.ui-block-a, li.ui-block-b', { timeout: 30000 });
     }
 
     // Esperar un poco más para asegurar que todo cargó
@@ -389,8 +389,8 @@ async function scrapePage(url, compania = 'entel') {
 
         const equipos = [];
 
-        // Obtener todos los contenedores de equipos
-        const equipoCards = document.querySelectorAll('li.ui-block-a');
+        // Obtener todos los contenedores de equipos (ambas clases: ui-block-a y ui-block-b)
+        const equipoCards = document.querySelectorAll('li.ui-block-a, li.ui-block-b');
 
         equipoCards.forEach(card => {
           // Verificar que tenga la estructura de producto
