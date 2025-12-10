@@ -101,6 +101,14 @@ async function scrapePage(url, compania = 'entel') {
       await page.waitForSelector('li.item.product.product-item', { timeout: 30000 });
     } else if (compania.toLowerCase() === 'claro') {
       await page.waitForSelector('li.ui-block-a, li.ui-block-b', { timeout: 30000 });
+    } else if (compania.toLowerCase() === 'ripley') {
+      await page.waitForSelector('.catalog-product-item', { timeout: 30000 });
+    } else if (compania.toLowerCase() === 'falabella') {
+      await page.waitForSelector('.search-results-list', { timeout: 30000 });
+    } else if (compania.toLowerCase() === 'paris') {
+      await page.waitForSelector('.product-item', { timeout: 30000 });
+    } else if (compania.toLowerCase() === 'mercadolibre') {
+      await page.waitForSelector('.ui-search-result', { timeout: 30000 });
     }
 
     // Esperar un poco más para asegurar que todo cargó
@@ -475,6 +483,352 @@ async function scrapePage(url, compania = 'entel') {
 
         return equipos;
       });
+
+    } else if (compania.toLowerCase() === 'ripley') {
+      // ========== RIPLEY: Scraping de un nivel ==========
+
+      equiposData = await page.evaluate(() => {
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
+
+        const equipos = [];
+        const equipoCards = document.querySelectorAll('.catalog-product-item');
+
+        equipoCards.forEach(card => {
+          // Extraer URL del equipo
+          const linkElement = card.querySelector('a.catalog-product-item__link');
+          const equipoUrl = linkElement ? linkElement.getAttribute('href') : 'N/A';
+
+          // Extraer el nombre completo del equipo
+          const nombreCompleto = getText(card, '.catalog-product-item__name');
+
+          // Intentar separar marca y modelo
+          let marcaEquipo = 'N/A';
+          let modelo = nombreCompleto;
+
+          if (nombreCompleto !== 'N/A') {
+            const palabras = nombreCompleto.split(' ');
+            if (palabras.length > 0) {
+              marcaEquipo = palabras[0];
+              modelo = nombreCompleto;
+            }
+          }
+
+          // Extraer capacidad del nombre
+          let capacityEquipo = 'N/A';
+          const capacityMatch = nombreCompleto.match(/(\d+\s*GB)/i);
+          if (capacityMatch) {
+            capacityEquipo = capacityMatch[1].replace(/(\d+)GB/, '$1 GB');
+          }
+
+          // Extraer precio oferta
+          const precioOferta = getText(card, '.catalog-prices__offer-price');
+
+          // Extraer precio normal
+          const precioNormal = getText(card, '.catalog-prices__list-price');
+
+          // Extraer descuento
+          const descuentoEquipo = getText(card, '.catalog-product-item__discount');
+
+          // Extraer información de cuotas
+          let numeroCuota = 'N/A';
+          let precioCuota = 'N/A';
+          const cuotasElement = card.querySelector('.catalog-prices__installment');
+          if (cuotasElement) {
+            const cuotasText = cuotasElement.textContent;
+            const numeroCuotaMatch = cuotasText.match(/(\d+)\s*cuotas/i);
+            if (numeroCuotaMatch) numeroCuota = numeroCuotaMatch[1];
+            const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)/);
+            if (precioCuotaMatch) precioCuota = '$' + precioCuotaMatch[1];
+          }
+
+          const numeroCuotaNormal = 'N/A';
+          const precioCuotaNormal = 'N/A';
+
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            capacityEquipo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal,
+            precioCuotaNormal,
+            equipoUrl
+          });
+        });
+
+        return equipos;
+      });
+
+    } else if (compania.toLowerCase() === 'falabella') {
+      // ========== FALABELLA: Scraping de un nivel ==========
+
+      equiposData = await page.evaluate(() => {
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
+
+        const equipos = [];
+        const equipoCards = document.querySelectorAll('.search-results-list .pod');
+
+        equipoCards.forEach(card => {
+          // Extraer URL del equipo
+          const linkElement = card.querySelector('a.pod-link');
+          const equipoUrl = linkElement ? linkElement.getAttribute('href') : 'N/A';
+
+          // Extraer el nombre completo del equipo
+          const nombreCompleto = getText(card, '.pod-subTitle');
+
+          // Intentar separar marca y modelo
+          let marcaEquipo = 'N/A';
+          let modelo = nombreCompleto;
+
+          if (nombreCompleto !== 'N/A') {
+            const palabras = nombreCompleto.split(' ');
+            if (palabras.length > 0) {
+              marcaEquipo = palabras[0];
+              modelo = nombreCompleto;
+            }
+          }
+
+          // Extraer capacidad del nombre
+          let capacityEquipo = 'N/A';
+          const capacityMatch = nombreCompleto.match(/(\d+\s*GB)/i);
+          if (capacityMatch) {
+            capacityEquipo = capacityMatch[1].replace(/(\d+)GB/, '$1 GB');
+          }
+
+          // Extraer precio oferta
+          const precioOferta = getText(card, '.copy10');
+
+          // Extraer precio normal
+          const precioNormal = getText(card, '.copy12');
+
+          // Extraer descuento
+          const descuentoEquipo = getText(card, '.copy14');
+
+          // Extraer información de cuotas
+          let numeroCuota = 'N/A';
+          let precioCuota = 'N/A';
+          const cuotasElement = card.querySelector('.copy16');
+          if (cuotasElement) {
+            const cuotasText = cuotasElement.textContent;
+            const numeroCuotaMatch = cuotasText.match(/(\d+)\s*cuotas/i);
+            if (numeroCuotaMatch) numeroCuota = numeroCuotaMatch[1];
+            const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)/);
+            if (precioCuotaMatch) precioCuota = '$' + precioCuotaMatch[1];
+          }
+
+          const numeroCuotaNormal = 'N/A';
+          const precioCuotaNormal = 'N/A';
+
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            capacityEquipo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal,
+            precioCuotaNormal,
+            equipoUrl
+          });
+        });
+
+        return equipos;
+      });
+
+    } else if (compania.toLowerCase() === 'paris') {
+      // ========== PARIS: Scraping de un nivel ==========
+
+      equiposData = await page.evaluate(() => {
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
+
+        const equipos = [];
+        const equipoCards = document.querySelectorAll('.product-item');
+
+        equipoCards.forEach(card => {
+          // Extraer URL del equipo
+          const linkElement = card.querySelector('a.product-item-link');
+          const equipoUrl = linkElement ? linkElement.getAttribute('href') : 'N/A';
+
+          // Extraer el nombre completo del equipo
+          const nombreCompleto = getText(card, '.product-item-name');
+
+          // Intentar separar marca y modelo
+          let marcaEquipo = 'N/A';
+          let modelo = nombreCompleto;
+
+          if (nombreCompleto !== 'N/A') {
+            const palabras = nombreCompleto.split(' ');
+            if (palabras.length > 0) {
+              marcaEquipo = palabras[0];
+              modelo = nombreCompleto;
+            }
+          }
+
+          // Extraer capacidad del nombre
+          let capacityEquipo = 'N/A';
+          const capacityMatch = nombreCompleto.match(/(\d+\s*GB)/i);
+          if (capacityMatch) {
+            capacityEquipo = capacityMatch[1].replace(/(\d+)GB/, '$1 GB');
+          }
+
+          // Extraer precio oferta
+          const precioOferta = getText(card, '.price-internet');
+
+          // Extraer precio normal
+          const precioNormal = getText(card, '.price-old');
+
+          // Extraer descuento
+          const descuentoEquipo = getText(card, '.discount-percentage');
+
+          // Extraer información de cuotas
+          let numeroCuota = 'N/A';
+          let precioCuota = 'N/A';
+          const cuotasElement = card.querySelector('.installment-info');
+          if (cuotasElement) {
+            const cuotasText = cuotasElement.textContent;
+            const numeroCuotaMatch = cuotasText.match(/(\d+)\s*cuotas/i);
+            if (numeroCuotaMatch) numeroCuota = numeroCuotaMatch[1];
+            const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)/);
+            if (precioCuotaMatch) precioCuota = '$' + precioCuotaMatch[1];
+          }
+
+          const numeroCuotaNormal = 'N/A';
+          const precioCuotaNormal = 'N/A';
+
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            capacityEquipo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal,
+            precioCuotaNormal,
+            equipoUrl
+          });
+        });
+
+        return equipos;
+      });
+
+    } else if (compania.toLowerCase() === 'mercadolibre') {
+      // ========== MERCADOLIBRE: Scraping de un nivel ==========
+
+      equiposData = await page.evaluate(() => {
+        const getText = (element, selector) => {
+          if (!element) return 'N/A';
+          const el = element.querySelector(selector);
+          return el ? el.textContent.trim() : 'N/A';
+        };
+
+        const equipos = [];
+        const equipoCards = document.querySelectorAll('.ui-search-result');
+
+        equipoCards.forEach(card => {
+          // Extraer URL del equipo
+          const linkElement = card.querySelector('a.ui-search-link');
+          const equipoUrl = linkElement ? linkElement.getAttribute('href') : 'N/A';
+
+          // Extraer el nombre completo del equipo
+          const nombreCompleto = getText(card, '.ui-search-item__title');
+
+          // Intentar separar marca y modelo
+          let marcaEquipo = 'N/A';
+          let modelo = nombreCompleto;
+
+          if (nombreCompleto !== 'N/A') {
+            const palabras = nombreCompleto.split(' ');
+            if (palabras.length > 0) {
+              // Detectar marcas comunes
+              const primerasPalabras = palabras.slice(0, 2).join(' ').toLowerCase();
+              if (primerasPalabras.includes('samsung')) marcaEquipo = 'Samsung';
+              else if (primerasPalabras.includes('iphone') || primerasPalabras.includes('apple')) marcaEquipo = 'Apple';
+              else if (primerasPalabras.includes('motorola')) marcaEquipo = 'Motorola';
+              else if (primerasPalabras.includes('xiaomi')) marcaEquipo = 'Xiaomi';
+              else if (primerasPalabras.includes('huawei')) marcaEquipo = 'Huawei';
+              else if (primerasPalabras.includes('oppo')) marcaEquipo = 'Oppo';
+              else if (primerasPalabras.includes('realme')) marcaEquipo = 'Realme';
+              else marcaEquipo = palabras[0];
+
+              modelo = nombreCompleto;
+            }
+          }
+
+          // Extraer capacidad del nombre
+          let capacityEquipo = 'N/A';
+          const capacityMatch = nombreCompleto.match(/(\d+\s*GB)/i);
+          if (capacityMatch) {
+            capacityEquipo = capacityMatch[1].replace(/(\d+)GB/, '$1 GB');
+          }
+
+          // Extraer precio oferta
+          let precioOferta = getText(card, '.andes-money-amount__fraction');
+          if (precioOferta !== 'N/A') {
+            const simbolo = getText(card, '.andes-money-amount__currency-symbol');
+            if (simbolo !== 'N/A') precioOferta = simbolo + precioOferta;
+          }
+
+          // Extraer precio normal (tachado)
+          let precioNormal = getText(card, '.andes-money-amount--previous .andes-money-amount__fraction');
+          if (precioNormal !== 'N/A') {
+            const simboloNormal = getText(card, '.andes-money-amount--previous .andes-money-amount__currency-symbol');
+            if (simboloNormal !== 'N/A') precioNormal = simboloNormal + precioNormal;
+          }
+
+          // Extraer descuento
+          const descuentoEquipo = getText(card, '.ui-search-price__discount');
+
+          // Extraer información de cuotas
+          let numeroCuota = 'N/A';
+          let precioCuota = 'N/A';
+          const cuotasElement = card.querySelector('.ui-search-installments');
+          if (cuotasElement) {
+            const cuotasText = cuotasElement.textContent;
+            const numeroCuotaMatch = cuotasText.match(/(\d+)x/i);
+            if (numeroCuotaMatch) numeroCuota = numeroCuotaMatch[1];
+            const precioCuotaMatch = cuotasText.match(/\$([0-9.,]+)/);
+            if (precioCuotaMatch) precioCuota = '$' + precioCuotaMatch[1];
+          }
+
+          const numeroCuotaNormal = 'N/A';
+          const precioCuotaNormal = 'N/A';
+
+          equipos.push({
+            marcaEquipo,
+            modelo,
+            capacityEquipo,
+            precioOferta,
+            descuentoEquipo,
+            numeroCuota,
+            precioCuota,
+            precioNormal,
+            numeroCuotaNormal,
+            precioCuotaNormal,
+            equipoUrl
+          });
+        });
+
+        return equipos;
+      });
     }
 
     await browser.close();
@@ -501,6 +855,30 @@ async function scrapePage(url, compania = 'entel') {
           } else {
             finalUrl = `https://www.clarochile.cl${equipo.equipoUrl}`;
           }
+        } else if (compania.toLowerCase() === 'ripley') {
+          // Ripley puede tener URL relativa o completa
+          if (equipo.equipoUrl.startsWith('http')) {
+            finalUrl = equipo.equipoUrl;
+          } else {
+            finalUrl = `https://simple.ripley.cl${equipo.equipoUrl}`;
+          }
+        } else if (compania.toLowerCase() === 'falabella') {
+          // Falabella puede tener URL relativa o completa
+          if (equipo.equipoUrl.startsWith('http')) {
+            finalUrl = equipo.equipoUrl;
+          } else {
+            finalUrl = `https://www.falabella.com${equipo.equipoUrl}`;
+          }
+        } else if (compania.toLowerCase() === 'paris') {
+          // Paris puede tener URL relativa o completa
+          if (equipo.equipoUrl.startsWith('http')) {
+            finalUrl = equipo.equipoUrl;
+          } else {
+            finalUrl = `https://www.paris.cl${equipo.equipoUrl}`;
+          }
+        } else if (compania.toLowerCase() === 'mercadolibre') {
+          // MercadoLibre ya tiene la URL completa
+          finalUrl = equipo.equipoUrl;
         }
       }
 
